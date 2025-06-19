@@ -2457,38 +2457,51 @@ SQL_TEMPLATES = {
                       update_time = EXCLUDED.update_time
                      """,
     "relationships": """
-    WITH relevant_chunks AS (
-        SELECT id as chunk_id
-        FROM LIGHTRAG_DOC_CHUNKS
-        WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[])
-    )
-    SELECT source_id as src_id, target_id as tgt_id, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at
-    FROM (
-        SELECT r.id, r.source_id, r.target_id, r.create_time, 1 - (r.content_vector <=> '[{embedding_string}]'::vector) as distance
-        FROM LIGHTRAG_VDB_RELATION r
-        JOIN relevant_chunks c ON c.chunk_id = ANY(r.chunk_ids)
-        WHERE r.workspace=$1
-    ) filtered
-    WHERE distance>$3
-    ORDER BY distance DESC
-    LIMIT $4
+        WITH relevant_chunks AS (
+            SELECT id as chunk_id
+            FROM LIGHTRAG_DOC_CHUNKS
+            WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[]) -- Parameter $2: array of full_doc_ids or NULL
+        )
+        SELECT
+            r.source_id as src_id,
+            r.target_id as tgt_id,
+            EXTRACT(EPOCH FROM r.create_time)::BIGINT as created_at
+        FROM
+            LIGHTRAG_VDB_RELATION r
+        WHERE
+            r.workspace = $1 -- Parameter $1: workspace
+            AND (1 - (r.content_vector <=> '[{embedding_string}]'::vector)) > $3 -- Parameter $3: similarity threshold
+            AND EXISTS (
+                SELECT 1
+                FROM relevant_chunks rc
+                WHERE rc.chunk_id = ANY(r.chunk_ids) -- Check link to at least one relevant chunk
+            )
+        ORDER BY
+            (r.content_vector <=> '[{embedding_string}]'::vector) ASC -- Order by distance
+        LIMIT $4; -- Parameter $4: top_k limit
     """,
     "entities": """
         WITH relevant_chunks AS (
             SELECT id as chunk_id
             FROM LIGHTRAG_DOC_CHUNKS
-            WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[])
+            WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[]) -- Parameter $2: array of full_doc_ids or NULL
         )
-        SELECT entity_name, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM
-            (
-                SELECT e.id, e.entity_name, e.create_time, 1 - (e.content_vector <=> '[{embedding_string}]'::vector) as distance
-                FROM LIGHTRAG_VDB_ENTITY e
-                JOIN relevant_chunks c ON c.chunk_id = ANY(e.chunk_ids)
-                WHERE e.workspace=$1
-            ) as chunk_distances
-            WHERE distance>$3
-            ORDER BY distance DESC
-            LIMIT $4
+        SELECT
+            e.entity_name,
+            EXTRACT(EPOCH FROM e.create_time)::BIGINT as created_at
+        FROM
+            LIGHTRAG_VDB_ENTITY e
+        WHERE
+            e.workspace = $1 -- Parameter $1: workspace
+            AND (1 - (e.content_vector <=> '[{embedding_string}]'::vector)) > $3 -- Parameter $3: similarity threshold
+            AND EXISTS (
+                SELECT 1
+                FROM relevant_chunks rc
+                WHERE rc.chunk_id = ANY(e.chunk_ids) -- Check link to at least one relevant chunk
+            )
+        ORDER BY
+            (e.content_vector <=> '[{embedding_string}]'::vector) ASC -- Order by distance
+        LIMIT $4; -- Parameter $4: top_k limit
     """,
     "chunks": """
         WITH relevant_chunks AS (
