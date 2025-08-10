@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Union, final
 import numpy as np
 import configparser
+import re
 
 from lightrag.types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 
@@ -1226,11 +1227,18 @@ class PGGraphStorage(BaseGraphStorage):
                     for vertex in vertexes:
                         vertices[vertex["id"]] = vertex.get("properties")
                 else:
-                    dtype = v.split("::")[-1]
-                    v = v.split("::")[0]
-                    if dtype == "vertex":
-                        vertex = json.loads(v)
-                        vertices[vertex["id"]] = vertex.get("properties")
+                    # Use regex to properly extract type and value when there are multiple :: in the string
+                    match = re.search(r'::(\w+)$', v)
+                    if match:
+                        dtype = match.group(1)
+                        v_content = v[:match.start()]
+                        if dtype == "vertex":
+                            vertex = json.loads(v_content)
+                            vertices[vertex["id"]] = vertex.get("properties")
+                    else:
+                        # Log unexpected format instead of silent failure
+                        print(f"WARNING: unexpected agtype format: {v}")
+                        continue
 
         # iterate returned fields and parse appropriately
         for k in record.keys():
@@ -1249,12 +1257,20 @@ class PGGraphStorage(BaseGraphStorage):
                         continue
 
                 else:
-                    dtype = v.split("::")[-1]
-                    v = v.split("::")[0]
-                    if dtype == "vertex":
-                        d[k] = json.loads(v)
-                    elif dtype == "edge":
-                        d[k] = json.loads(v)
+                    # Use regex to properly extract type and value when there are multiple :: in the string
+                    match = re.search(r'::(\w+)$', v)
+                    if match:
+                        dtype = match.group(1)
+                        v_content = v[:match.start()]
+                        if dtype == "vertex":
+                            d[k] = json.loads(v_content)
+                        elif dtype == "edge":
+                            d[k] = json.loads(v_content)
+                        else:
+                            print(f"WARNING: unsupported agtype: {dtype}")
+                    else:
+                        # Log unexpected format instead of silent failure
+                        print(f"WARNING: unexpected agtype format: {v}")
             else:
                 d[k] = v  # Keep as string
 
